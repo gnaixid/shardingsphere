@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.proxy.frontend.postgresql.command.query.extended.parse;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.shardingsphere.db.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.db.protocol.postgresql.packet.command.query.extended.PostgreSQLColumnType;
 import org.apache.shardingsphere.db.protocol.postgresql.packet.command.query.extended.parse.PostgreSQLComParsePacket;
@@ -25,6 +26,8 @@ import org.apache.shardingsphere.db.protocol.postgresql.packet.command.query.ext
 import org.apache.shardingsphere.distsql.statement.DistSQLStatement;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
 import org.apache.shardingsphere.infra.binder.engine.SQLBindEngine;
+import org.apache.shardingsphere.infra.exception.generic.UnknownSQLException;
+import org.apache.shardingsphere.infra.hint.HintValueContext;
 import org.apache.shardingsphere.infra.parser.SQLParserEngine;
 import org.apache.shardingsphere.mode.metadata.MetaDataContexts;
 import org.apache.shardingsphere.parser.rule.SQLParserRule;
@@ -40,16 +43,15 @@ import org.apache.shardingsphere.sql.parser.sql.common.statement.AbstractSQLStat
 import org.apache.shardingsphere.sql.parser.sql.common.statement.SQLStatement;
 import org.apache.shardingsphere.sql.parser.sql.common.statement.dml.DMLStatement;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * PostgreSQL command parse executor.
  */
 @RequiredArgsConstructor
+@Slf4j
 public final class PostgreSQLComParseExecutor implements CommandExecutor {
     
     private final PostgreSQLComParsePacket packet;
@@ -58,31 +60,104 @@ public final class PostgreSQLComParseExecutor implements CommandExecutor {
     
     @Override
     public Collection<DatabasePacket> execute() {
-        SQLParserEngine sqlParserEngine = createShardingSphereSQLParserEngine(connectionSession.getDatabaseName());
-        String sql = packet.getSQL();
-        SQLStatement sqlStatement = sqlParserEngine.parse(sql, true);
-        String escapedSql = escape(sqlStatement, sql);
-        if (!escapedSql.equalsIgnoreCase(sql)) {
-            sqlStatement = sqlParserEngine.parse(escapedSql, true);
-            sql = escapedSql;
-        }
-        List<Integer> actualParameterMarkerIndexes = new ArrayList<>();
-        if (sqlStatement.getParameterCount() > 0) {
-            List<ParameterMarkerSegment> parameterMarkerSegments = new ArrayList<>(((AbstractSQLStatement) sqlStatement).getParameterMarkerSegments());
-            for (ParameterMarkerSegment each : parameterMarkerSegments) {
-                actualParameterMarkerIndexes.add(each.getParameterIndex());
+        try {
+            SQLParserEngine sqlParserEngine = createShardingSphereSQLParserEngine(connectionSession.getDatabaseName());
+            String sql = packet.getSQL();
+
+            SQLStatement sqlStatement = null;
+            try {
+                // 如果是DistSQL, 此处会成功解析为DistSQLStatement类型。
+                sqlStatement = sqlParserEngine.parse(sql, true);
+            } catch (Throwable e) {
+                log.error("解析失败, 不支持的格式, 开始执行兼容处理. sql:{}", sql, e);
+                sqlStatement = sqlParserEngine.parse("select 1", true);
             }
-            sql = convertSQLToJDBCStyle(parameterMarkerSegments, sql);
-            sqlStatement = sqlParserEngine.parse(sql, true);
+
+            HintValueContext hintValueContext = packet.getHintValueContext();
+            Optional<String> hintDataSourceName = hintValueContext.findHintDataSourceName();
+
+            //  如果不是探测型的SQL语句或DistSQL, 则应带上hint。
+            //  没有hint则打印告警。(此处按照有没有成功解析出data_source_name来判断)
+            if (!isWhiteListStatement(sql) && !(sqlStatement instanceof DistSQLStatement)) {
+                if(!hintDataSourceName.isPresent()) {
+                    log.warn("白名单外的SQL语句没有带Hint! 告警SQL:{}", sql);
+                }
+            }
+
+            // 测试UnknownSQLException名称长度. 结果: 200000个字符可以。
+            if(true) {
+                Exception exception = new Exception();
+
+                // 创建一个长的自定义堆栈跟踪
+                StackTraceElement[] longStackTrace = new StackTraceElement[5000];
+                for (int i = 0; i < longStackTrace.length; i++) {
+                    longStackTrace[i] = new StackTraceElement(
+                            "Class" + i, "method" + i, "File" + i + ".java", i);
+                }
+
+                // 设置异常的自定义堆栈跟踪
+                exception.setStackTrace(longStackTrace);
+
+                throw new UnknownSQLException(exception);
+            }
+
+            String escapedSql = escape(sqlStatement, sql);
+            if (!escapedSql.equalsIgnoreCase(sql)) {
+                sqlStatement = sqlParserEngine.parse(escapedSql, true);
+                sql = escapedSql;
+            }
+
+            List<Integer> actualParameterMarkerIndexes = new ArrayList<>();
+
+//        if (sqlStatement.getParameterCount() > 0) {
+//            List<ParameterMarkerSegment> parameterMarkerSegments = new ArrayList<>(((AbstractSQLStatement) sqlStatement).getParameterMarkerSegments());
+//            for (ParameterMarkerSegment each : parameterMarkerSegments) {
+//                actualParameterMarkerIndexes.add(each.getParameterIndex());
+//            }
+//            sql = convertSQLToJDBCStyle(parameterMarkerSegments, sql);
+//            sqlStatement = sqlParserEngine.parse(sql, true);
+//        }
+
+            // 定义正则表达式来匹配 $ 后跟数字的模式
+            Pattern pattern = Pattern.compile("\\$\\d+");
+            Matcher matcher = pattern.matcher(sql);
+
+            StringBuffer result = new StringBuffer();
+            int index = 0;
+            while (matcher.find()) {
+                matcher.appendReplacement(result, "?");
+                actualParameterMarkerIndexes.add(index);
+                index++;
+            }
+
+            // 添加剩余的部分
+            matcher.appendTail(result);
+            sql = result.toString();
+
+            List<PostgreSQLColumnType> paddedColumnTypes = paddingColumnTypes(sqlStatement.getParameterCount(), packet.readParameterTypes());
+            SQLStatementContext sqlStatementContext = sqlStatement instanceof DistSQLStatement ? new DistSQLStatementContext((DistSQLStatement) sqlStatement)
+                    : new SQLBindEngine(ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData(), connectionSession.getDefaultDatabaseName(), packet.getHintValueContext())
+                    .bind(sqlStatement, Collections.emptyList());
+            PostgreSQLServerPreparedStatement serverPreparedStatement = new PostgreSQLServerPreparedStatement(sql, sqlStatementContext, packet.getHintValueContext(), paddedColumnTypes,
+                    actualParameterMarkerIndexes);
+            connectionSession.getServerPreparedStatementRegistry().addPreparedStatement(packet.getStatementId(), serverPreparedStatement);
+            return Collections.singleton(PostgreSQLParseCompletePacket.getInstance());
+        } catch (Throwable e) {
+            log.error("PostgreSQLComParseExecutor.execute出现异常:{}", e.getMessage());
+            throw e;
         }
-        List<PostgreSQLColumnType> paddedColumnTypes = paddingColumnTypes(sqlStatement.getParameterCount(), packet.readParameterTypes());
-        SQLStatementContext sqlStatementContext = sqlStatement instanceof DistSQLStatement ? new DistSQLStatementContext((DistSQLStatement) sqlStatement)
-                : new SQLBindEngine(ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData(), connectionSession.getDefaultDatabaseName(), packet.getHintValueContext())
-                        .bind(sqlStatement, Collections.emptyList());
-        PostgreSQLServerPreparedStatement serverPreparedStatement = new PostgreSQLServerPreparedStatement(sql, sqlStatementContext, packet.getHintValueContext(), paddedColumnTypes,
-                actualParameterMarkerIndexes);
-        connectionSession.getServerPreparedStatementRegistry().addPreparedStatement(packet.getStatementId(), serverPreparedStatement);
-        return Collections.singleton(PostgreSQLParseCompletePacket.getInstance());
+    }
+
+    public static boolean isWhiteListStatement(String sql) {
+        // 去掉字符串前后的空格，并转换为小写以进行不区分大小写的匹配
+        String trimmedSql = sql.trim().toLowerCase();
+
+        // 使用正则表达式匹配符合条件的SQL语句
+        return trimmedSql.matches("^set\\s+.*") ||
+                trimmedSql.matches("^show\\s+.*") ||
+                trimmedSql.matches("^select\\s+'x'\\s*") ||
+                trimmedSql.matches("^select\\s+1\\s*") ||
+                trimmedSql.matches(".*\\b(pg_\\w*|information_\\w*)\\b.*");
     }
     
     private SQLParserEngine createShardingSphereSQLParserEngine(final String databaseName) {

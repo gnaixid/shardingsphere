@@ -75,6 +75,7 @@ public class LogbackConfiguration extends BasicConfigurator {
     
     private void initBasicLogger(final LoggerContext loggerContext) {
         loggerContext.getLogger(SHARDINGSPHERE_SQL_LOGGER_NAME).setLevel(Level.INFO);
+        loggerContext.getLogger("org.apache.shardingsphere.proxy.frontend.postgresql.command.query.extended.parse").setLevel(Level.INFO);
         loggerContext.getLogger(HIKARI_LOGGER_NAME).setLevel(Level.ERROR);
         loggerContext.getLogger(ATOMIKOS_LOGGER_NAME).setLevel(Level.ERROR);
         loggerContext.getLogger(NETTY_LOGGER_NAME).setLevel(Level.ERROR);
