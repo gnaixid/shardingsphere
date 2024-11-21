@@ -73,23 +73,6 @@ public final class PostgreSQLComBindExecutor implements CommandExecutor {
                 log.error("bind-parameters:{}", sb.toString());
             }
             throw e;
-        } finally {
-            log.error("bind-阶段出错.");
-            if(preparedStatement != null) {
-                log.error("bind-SQL:{}", preparedStatement.getSql());
-            }
-            if(parameters != null) {
-                StringBuilder sb = new StringBuilder();
-                sb.append("[");
-                for (Object parameter : parameters) {
-                    sb.append(parameter.getClass().getSimpleName());
-                    sb.append("-");
-                    sb.append(parameter);
-                    sb.append(",");
-                }
-                sb.append("]");
-                log.error("bind-parameters:{}", sb);
-            }
         }
     }
 }
