@@ -84,22 +84,22 @@ public final class PostgreSQLComParseExecutor implements CommandExecutor {
                 }
             }
 
-            // 测试UnknownSQLException名称长度. 结果: 200000个字符可以。
-            if(true) {
-                Exception exception = new Exception();
-
-                // 创建一个长的自定义堆栈跟踪
-                StackTraceElement[] longStackTrace = new StackTraceElement[5000];
-                for (int i = 0; i < longStackTrace.length; i++) {
-                    longStackTrace[i] = new StackTraceElement(
-                            "Class" + i, "method" + i, "File" + i + ".java", i);
-                }
-
-                // 设置异常的自定义堆栈跟踪
-                exception.setStackTrace(longStackTrace);
-
-                throw new UnknownSQLException(exception);
-            }
+//            // 测试UnknownSQLException名称长度. 结果: 200000个字符可以。
+//            if(true) {
+//                Exception exception = new Exception();
+//
+//                // 创建一个长的自定义堆栈跟踪
+//                StackTraceElement[] longStackTrace = new StackTraceElement[5000];
+//                for (int i = 0; i < longStackTrace.length; i++) {
+//                    longStackTrace[i] = new StackTraceElement(
+//                            "Class" + i, "method" + i, "File" + i + ".java", i);
+//                }
+//
+//                // 设置异常的自定义堆栈跟踪
+//                exception.setStackTrace(longStackTrace);
+//
+//                throw new UnknownSQLException(exception);
+//            }
 
             String escapedSql = escape(sqlStatement, sql);
             if (!escapedSql.equalsIgnoreCase(sql)) {
