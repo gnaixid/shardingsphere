@@ -156,9 +156,6 @@ public final class PostgreSQLComParseExecutor implements CommandExecutor {
         // 使用正则表达式匹配符合条件的SQL语句
         return trimmedSql.startsWith("set") ||
                 trimmedSql.startsWith("show") ||
-                trimmedSql.startsWith("begin") ||
-                trimmedSql.startsWith("commit") ||
-                trimmedSql.startsWith("rollback") ||
                 trimmedSql.startsWith("select 1") ||
                 trimmedSql.startsWith("select 'x'") ||
                 trimmedSql.startsWith("select current_schema") ||
