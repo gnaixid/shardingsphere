@@ -153,10 +153,15 @@ public final class PostgreSQLComParseExecutor implements CommandExecutor {
         String trimmedSql = sql.trim().toLowerCase();
 
         // 使用正则表达式匹配符合条件的SQL语句
-        return trimmedSql.matches("^set\\s+.*") ||
-                trimmedSql.matches("^show\\s+.*") ||
-                trimmedSql.matches("^select\\s+'x'\\s*") ||
-                trimmedSql.matches("^select\\s+1\\s*") ||
+        // 使用正则表达式匹配符合条件的SQL语句
+        return trimmedSql.startsWith("set") ||
+                trimmedSql.startsWith("show") ||
+                trimmedSql.startsWith("begin") ||
+                trimmedSql.startsWith("commit") ||
+                trimmedSql.startsWith("rollback") ||
+                trimmedSql.startsWith("select 1") ||
+                trimmedSql.startsWith("select 'x'") ||
+                trimmedSql.startsWith("select current_schema") ||
                 trimmedSql.matches(".*\\b(pg_\\w*|information_\\w*)\\b.*");
     }
     
