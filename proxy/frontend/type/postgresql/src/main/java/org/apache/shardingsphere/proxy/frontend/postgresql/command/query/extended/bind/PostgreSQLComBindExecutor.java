@@ -59,17 +59,19 @@ public final class PostgreSQLComBindExecutor implements CommandExecutor {
             portal.bind();
             return Collections.singleton(PostgreSQLBindCompletePacket.getInstance());
         } catch (Throwable e) {
-            log.error("bind-阶段出错.");
+            log.error("bind-阶段出错.", e);
             if(preparedStatement != null) {
                 log.error("bind-SQL:{}", preparedStatement.getSql());
             }
             if(parameters != null) {
                 StringBuilder sb = new StringBuilder();
+                sb.append("[");
                 for (Object parameter : parameters) {
                     sb.append(parameter.getClass());
                     sb.append(" - ");
                     sb.append(parameter);
                 }
+                sb.append("]");
                 log.error("bind-parameters:{}", sb.toString());
             }
             throw e;
