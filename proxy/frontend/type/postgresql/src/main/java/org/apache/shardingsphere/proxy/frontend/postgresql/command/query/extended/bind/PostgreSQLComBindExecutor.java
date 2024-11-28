@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.proxy.frontend.postgresql.command.query.extended.bind;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.shardingsphere.db.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.db.protocol.postgresql.packet.command.query.extended.bind.PostgreSQLBindCompletePacket;
 import org.apache.shardingsphere.db.protocol.postgresql.packet.command.query.extended.bind.PostgreSQLComBindPacket;
@@ -37,6 +38,7 @@ import java.util.List;
  * Command bind executor for PostgreSQL.
  */
 @RequiredArgsConstructor
+@Slf4j
 public final class PostgreSQLComBindExecutor implements CommandExecutor {
     
     private final PortalContext portalContext;
@@ -47,12 +49,32 @@ public final class PostgreSQLComBindExecutor implements CommandExecutor {
     
     @Override
     public Collection<DatabasePacket> execute() throws SQLException {
+        List<Object> parameters = null;
         PostgreSQLServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(packet.getStatementId());
-        ProxyDatabaseConnectionManager databaseConnectionManager = connectionSession.getDatabaseConnectionManager();
-        List<Object> parameters = preparedStatement.adjustParametersOrder(packet.readParameters(preparedStatement.getParameterTypes()));
-        Portal portal = new Portal(packet.getPortal(), preparedStatement, parameters, packet.readResultFormats(), databaseConnectionManager);
-        portalContext.add(portal);
-        portal.bind();
-        return Collections.singleton(PostgreSQLBindCompletePacket.getInstance());
+        try {
+            ProxyDatabaseConnectionManager databaseConnectionManager = connectionSession.getDatabaseConnectionManager();
+            parameters = preparedStatement.adjustParametersOrder(packet.readParameters(preparedStatement.getParameterTypes()));
+            Portal portal = new Portal(packet.getPortal(), preparedStatement, parameters, packet.readResultFormats(), databaseConnectionManager);
+            portalContext.add(portal);
+            portal.bind();
+            return Collections.singleton(PostgreSQLBindCompletePacket.getInstance());
+        } catch (Throwable e) {
+            log.error("bind-阶段出错.", e);
+            if(preparedStatement != null) {
+                log.error("bind-SQL:{}", preparedStatement.getSql());
+            }
+            if(parameters != null) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("[");
+                for (Object parameter : parameters) {
+                    sb.append(parameter.getClass());
+                    sb.append(" - ");
+                    sb.append(parameter);
+                }
+                sb.append("]");
+                log.error("bind-parameters:{}", sb.toString());
+            }
+            throw e;
+        }
     }
 }

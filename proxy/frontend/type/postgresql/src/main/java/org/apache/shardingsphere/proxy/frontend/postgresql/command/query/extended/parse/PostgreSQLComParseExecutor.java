@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.proxy.frontend.postgresql.command.query.extended.parse;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.shardingsphere.db.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.db.protocol.postgresql.packet.command.query.extended.PostgreSQLColumnType;
 import org.apache.shardingsphere.db.protocol.postgresql.packet.command.query.extended.parse.PostgreSQLComParsePacket;
@@ -45,11 +46,14 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * PostgreSQL command parse executor.
  */
 @RequiredArgsConstructor
+@Slf4j
 public final class PostgreSQLComParseExecutor implements CommandExecutor {
     
     private final PostgreSQLComParsePacket packet;
@@ -58,23 +62,47 @@ public final class PostgreSQLComParseExecutor implements CommandExecutor {
     
     @Override
     public Collection<DatabasePacket> execute() {
+        try{
         SQLParserEngine sqlParserEngine = createShardingSphereSQLParserEngine(connectionSession.getUsedDatabaseName());
         String sql = packet.getSQL();
-        SQLStatement sqlStatement = sqlParserEngine.parse(sql, true);
+
+        SQLStatement sqlStatement = null;
+        try {
+            // 如果是DistSQL, 此处会成功解析为DistSQLStatement类型。
+            sqlStatement = sqlParserEngine.parse(sql, true);
+        } catch (Throwable e) {
+            log.error("解析失败, 不支持的格式, 开始执行兼容处理. sql:{}", sql, e);
+            sqlStatement = sqlParserEngine.parse("select 1", true);
+        }
+
         String escapedSql = escape(sqlStatement, sql);
         if (!escapedSql.equalsIgnoreCase(sql)) {
             sqlStatement = sqlParserEngine.parse(escapedSql, true);
             sql = escapedSql;
         }
         List<Integer> actualParameterMarkerIndexes = new ArrayList<>();
-        if (sqlStatement.getParameterCount() > 0) {
-            List<ParameterMarkerSegment> parameterMarkerSegments = new ArrayList<>(((AbstractSQLStatement) sqlStatement).getParameterMarkerSegments());
-            for (ParameterMarkerSegment each : parameterMarkerSegments) {
-                actualParameterMarkerIndexes.add(each.getParameterIndex());
-            }
-            sql = convertSQLToJDBCStyle(parameterMarkerSegments, sql);
-            sqlStatement = sqlParserEngine.parse(sql, true);
+//        if (sqlStatement.getParameterCount() > 0) {
+//            List<ParameterMarkerSegment> parameterMarkerSegments = new ArrayList<>(((AbstractSQLStatement) sqlStatement).getParameterMarkerSegments());
+//            for (ParameterMarkerSegment each : parameterMarkerSegments) {
+//                actualParameterMarkerIndexes.add(each.getParameterIndex());
+//            }
+//            sql = convertSQLToJDBCStyle(parameterMarkerSegments, sql);
+//            sqlStatement = sqlParserEngine.parse(sql, true);
+//        }
+
+        // 定义正则表达式来匹配 $ 后跟数字的模式
+        Pattern pattern = Pattern.compile("\\$\\d+");
+        Matcher matcher = pattern.matcher(sql);
+        StringBuffer result = new StringBuffer();
+        int index = 0;
+        while (matcher.find()) {
+            matcher.appendReplacement(result, "?");
+            actualParameterMarkerIndexes.add(index);
+            index++;
         }
+        matcher.appendTail(result);
+        sql = result.toString();
+
         List<PostgreSQLColumnType> paddedColumnTypes = paddingColumnTypes(sqlStatement.getParameterCount(), packet.readParameterTypes());
         SQLStatementContext sqlStatementContext = sqlStatement instanceof DistSQLStatement ? new DistSQLStatementContext((DistSQLStatement) sqlStatement)
                 : new SQLBindEngine(ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData(), connectionSession.getCurrentDatabaseName(), packet.getHintValueContext())
@@ -83,6 +111,10 @@ public final class PostgreSQLComParseExecutor implements CommandExecutor {
                 actualParameterMarkerIndexes);
         connectionSession.getServerPreparedStatementRegistry().addPreparedStatement(packet.getStatementId(), serverPreparedStatement);
         return Collections.singleton(PostgreSQLParseCompletePacket.getInstance());
+    } catch (Throwable e) {
+        log.error("PostgreSQLComParseExecutor.execute出现异常:{}", e.getMessage());
+        throw e;
+    }
     }
     
     private SQLParserEngine createShardingSphereSQLParserEngine(final String databaseName) {
