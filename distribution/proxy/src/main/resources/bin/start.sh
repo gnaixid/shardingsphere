@@ -85,7 +85,7 @@ CGROUP_MEM_OPTS="${CGROUP_MEM_OPTS:-${DEFAULT_CGROUP_MEM_OPTS}}"
 
 JAVA_OPTS=" -Djava.awt.headless=true "
 
-DEFAULT_JAVA_MEM_COMMON_OPTS=" -Xmx2g -Xms2g -Xmn1g "
+DEFAULT_JAVA_MEM_COMMON_OPTS=" -Xmx3g -Xms3g -Xmn2g "
 if [ -n "${IS_DOCKER}" ]; then
 	JAVA_MEM_COMMON_OPTS="${CGROUP_MEM_OPTS}"
 else
